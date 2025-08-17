@@ -1,264 +1,407 @@
-<!doctypehtml><html lang=en><meta charset=UTF-8><title>Spin the Wheel</title><style>body{font-family:Arial,sans-serif;text-align:center;background:#f0f0f0}.canvas-wrap{position:relative;display:inline-block;margin-top:20px}#wheelCanvas{background:0 0;border-radius:50%;display:block;z-index:1}#confettiCanvas{position:absolute;inset:0;pointer-events:none;border-radius:50%;z-index:3;background:0 0}.pointer{position:absolute;top:-20px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:18px solid transparent;border-right:18px solid transparent;border-top:28px solid #e63946;filter:drop-shadow(0 2px 2px rgba(0,0,0,.25));pointer-events:none;z-index:4}#controls{margin-top:20px}button,input,textarea{margin:5px;padding:8px}.hidden{display:none}.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:20}.modal{background:#fff;border-radius:12px;padding:18px 20px;width:320px;box-shadow:0 12px 30px rgba(0,0,0,.2);text-align:left}.modal h3{margin:0 0 8px;font-size:18px}.modal p{margin:0 0 16px}.modal .actions{display:flex;gap:10px;justify-content:flex-end}.btn{border:none;padding:10px 12px;border-radius:8px;cursor:pointer;font-weight:600}.btn.primary{background:#457b9d;color:#fff}.btn.warn{background:#e63946;color:#fff}.btn.ghost{background:#eee;color:#222}</style><h1>Spin the Wheel</h1><div id=controls><button onclick=setupWheel()>Set Names</button> <button onclick=spinWheel()>Spin!</button></div><div class=canvas-wrap id=canvasWrap><div class=pointer aria-hidden=true></div><canvas height=500 id=wheelCanvas width=500></canvas><canvas height=500 id=confettiCanvas width=500></canvas></div><h2 id=winner></h2><br><br><br><br><br><textarea cols=30 id=names placeholder="Enter names, one per line"rows=5></textarea><br><input id=forceName placeholder="Force winner (optional)"><br><label><input id=hideControls onchange=toggleControls() type=checkbox> Hide controls from view</label><div class=modal-backdrop id=winnerModalBackdrop aria-labelledby=winnerTitle aria-modal=true role=dialog><div class=modal><h3 id=winnerTitle>Winner</h3><p id=winnerText><div class=actions><button class="btn warn"id=removeBtn title="Remove the winner from the list">Remove</button> <button class="btn ghost"id=keepBtn title="Keep the winner in the list">Keep</button> <button class="btn primary"id=closeBtn>Close</button></div></div></div><script>/* ======= State & Consts ======= */
-let names = [];
-let startAngle = 0;   // radians
-let arc = 0;          // radians per slice
-let ctx;
-let forcedWinner = "";
-let lastIndex = -1;
-let rigTargetIndex = null; // exact target when forceName matches
+<!doctypehtml>
+  <html lang=en>
+  <meta charset=UTF-8>
+  <title>Spin the Wheel</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f0f0f0
+    }
 
-const pointerEl = document.querySelector('.pointer');
-const COLORS = ["#FFDD57", "#57C7FF", "#FF6F91", "#6BCB77", "#4D96FF", "#FF914D"];
-const POINTER_ANGLE = -Math.PI / 2; 
+    .canvas-wrap {
+      position: relative;
+      display: inline-block;
+      margin-top: 20px
+    }
 
-// Confetti state
-const confettiCanvas = document.getElementById("confettiCanvas");
-const cctx = confettiCanvas.getContext("2d");
-let confettiPieces = [];
-let confettiActive = false;
+    #wheelCanvas {
+      background: 0 0;
+      border-radius: 50%;
+      display: block;
+      z-index: 1
+    }
 
-// RAF spin state
-let animRAF = null, animStart = 0, animDuration = 0, animFrom = 0, animDelta = 0;
+    #confettiCanvas {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: 50%;
+      z-index: 3;
+      background: 0 0
+    }
 
-/* ======= Helpers ======= */
-function normalizeAngle(a){
-  const TWO_PI = Math.PI*2;
-  return ((a % TWO_PI) + TWO_PI) % TWO_PI;
-}
-function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+    .pointer {
+      position: absolute;
+      top: -20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 18px solid transparent;
+      border-right: 18px solid transparent;
+      border-top: 28px solid #e63946;
+      filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .25));
+      pointer-events: none;
+      z-index: 4
+    }
 
-/* ======= Setup & Draw ======= */
-function setupWheel() {
-  const input = document.getElementById("names").value.trim();
-  names = input.split("\n").map(n => n.trim()).filter(n => n);
-  forcedWinner = document.getElementById("forceName").value.trim();
-  arc = names.length ? Math.PI / (names.length / 2) : 0;
-  startAngle = normalizeAngle(startAngle);
-  drawWheel();
-  updatePointerColor();
-}
+    #controls {
+      margin-top: 20px
+    }
 
-function ensureSetup(){ if (!names.length) setupWheel(); }
+    button,
+    input,
+    textarea {
+      margin: 5px;
+      padding: 8px
+    }
 
-function drawWheel() {
-  const canvas = document.getElementById("wheelCanvas");
-  ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+    .hidden {
+      display: none
+    }
 
-  if (!names.length) {
-    ctx.beginPath(); ctx.arc(250, 250, 250, 0, Math.PI*2); ctx.fillStyle="#ffffff"; ctx.fill();
-    ctx.strokeStyle = "#ddd"; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = "#666"; ctx.font = "16px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("Enter names and click Set Names (or just press Spin)", 250, 250);
-    return;
-  }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 20
+    }
 
-  const base = normalizeAngle(startAngle);
+    .modal {
+      background: #fff;
+      border-radius: 12px;
+      padding: 18px 20px;
+      width: 320px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, .2);
+      text-align: left
+    }
 
-  for (let i = 0; i < names.length; i++) {
-    const angle = base + i * arc;
+    .modal h3 {
+      margin: 0 0 8px;
+      font-size: 18px
+    }
 
-    // slice
-    ctx.beginPath();
-    ctx.moveTo(250, 250);
-    ctx.arc(250, 250, 250, angle, angle + arc, false);
-    ctx.closePath();
-    ctx.fillStyle = COLORS[i % COLORS.length];
-    ctx.fill();
+    .modal p {
+      margin: 0 0 16px
+    }
 
-    // subtle separators
-    ctx.strokeStyle = "rgba(0,0,0,0.08)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    .modal .actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end
+    }
 
-    // label
-    ctx.save();
-    ctx.translate(250, 250);
-    ctx.rotate(angle + arc / 2);
-    ctx.fillStyle = "#000";
-    ctx.font = "16px Arial";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    ctx.fillText(names[i], 230, 0);
-    ctx.restore();
-  }
+    .btn {
+      border: none;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600
+    }
 
-  // center hub
-  ctx.beginPath();
-  ctx.arc(250, 250, 36, 0, Math.PI*2);
-  ctx.fillStyle = "#fff";
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "#eee";
-  ctx.stroke();
-}
+    .btn.primary {
+      background: #457b9d;
+      color: #fff
+    }
 
-/* ======= Pointer color tracking ======= */
-function updatePointerColor() {
-  if (!names.length || !arc) return;
-  const base = normalizeAngle(startAngle);
-  const landed = normalizeAngle(POINTER_ANGLE - base); // [0, 2π)
-  const idx = Math.floor(landed / arc) % names.length;
-  const color = COLORS[idx % COLORS.length];
-  pointerEl.style.borderTopColor = color; // pointer faces down
-}
+    .btn.warn {
+      background: #e63946;
+      color: #fff
+    }
 
-/* ======= Spin (with absolute rigging) ======= */
-function spinWheel() {
-  ensureSetup();
-  if (!names.length) return;
+    .btn.ghost {
+      background: #eee;
+      color: #222
+    }
 
-  // Timing feel same as earlier (4–7s)
-  const spinTimeTotal = Math.random() * 3000 + 4000; // 4s..7s
-  animDuration = spinTimeTotal;
+    #winnerText{
+      font-size: 35px;
+      text-align: center;
+    }
+  </style>
+  <h1>Spin the Wheel</h1>
+  <div id=controls><button onclick=setupWheel()>Set Names</button> <button onclick=spinWheel()>Spin!</button></div>
+  <div class=canvas-wrap id=canvasWrap>
+    <div class=pointer aria-hidden=true></div><canvas height=500 id=wheelCanvas width=500></canvas><canvas height=500
+      id=confettiCanvas width=500></canvas>
+  </div>
+  <h2 id=winner></h2><br><br><br><br><br><textarea cols=30 id=names placeholder="Enter names, one per line"
+    rows=5></textarea><br><input id=forceName placeholder="Force winner (optional)"><br><label><input id=hideControls
+      onchange=toggleControls() type=checkbox> Hide controls from view</label>
+  <div class=modal-backdrop id=winnerModalBackdrop aria-labelledby=winnerTitle aria-modal=true role=dialog>
+    <div class=modal>
+      <h3 id=winnerTitle>Winner</h3>
+      <p id=winnerText>
+      <div class=actions><button class="btn warn" id=removeBtn title="Remove the winner from the list">Remove</button>
+        <button class="btn ghost" id=keepBtn title="Keep the winner in the list">Keep</button> <button
+          class="btn primary" id=closeBtn>Close</button></div>
+    </div>
+  </div>
+  <script>/* ======= State & Consts ======= */
+    let names = [];
+    let startAngle = 0;   // radians
+    let arc = 0;          // radians per slice
+    let ctx;
+    let forcedWinner = "";
+    let lastIndex = -1;
+    let rigTargetIndex = null; // exact target when forceName matches
 
-  // Winner index: forced exact match or random
-  const fw = document.getElementById("forceName").value.trim();
-  forcedWinner = fw;
-  if (fw && names.includes(fw)) {
-    rigTargetIndex = names.indexOf(fw);
-  } else {
-    rigTargetIndex = null;
-  }
-  const winnerIndex = (rigTargetIndex !== null)
-    ? rigTargetIndex
-    : Math.floor(Math.random() * names.length);
+    const pointerEl = document.querySelector('.pointer');
+    const COLORS = ["#FFDD57", "#57C7FF", "#FF6F91", "#6BCB77", "#4D96FF", "#FF914D"];
+    const POINTER_ANGLE = -Math.PI / 2;
 
-// Align winner's slice center to the fixed pointer at top (correct math)
-const current = normalizeAngle(startAngle);
-// final base must satisfy: base_final + idx*arc + arc/2 = POINTER_ANGLE (mod 2π)
-const targetBase = normalizeAngle(POINTER_ANGLE - (winnerIndex * arc + arc / 2));
-// rotate from current base to target base + extra full turns for show
-let delta = normalizeAngle(targetBase - current) + Math.PI * 2 * 5;
+    // Confetti state
+    const confettiCanvas = document.getElementById("confettiCanvas");
+    const cctx = confettiCanvas.getContext("2d");
+    let confettiPieces = [];
+    let confettiActive = false;
 
-animFrom = current;
-animDelta = delta;
+    // RAF spin state
+    let animRAF = null, animStart = 0, animDuration = 0, animFrom = 0, animDelta = 0;
 
-  cancelAnimationFrame(animRAF);
-  animStart = performance.now();
-  animateSpin(winnerIndex);
-}
+    /* ======= Helpers ======= */
+    function normalizeAngle(a) {
+      const TWO_PI = Math.PI * 2;
+      return ((a % TWO_PI) + TWO_PI) % TWO_PI;
+    }
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
-function animateSpin(winnerIndex){
-  animRAF = requestAnimationFrame((now)=>{
-    const t = Math.min(1, (now - animStart) / animDuration);
-    const p = easeOutCubic(t);
-    startAngle = normalizeAngle(animFrom + animDelta * p);
-    drawWheel();
-    updatePointerColor();
+    /* ======= Setup & Draw ======= */
+    function setupWheel() {
+      const input = document.getElementById("names").value.trim();
+      names = input.split("\n").map(n => n.trim()).filter(n => n);
+      forcedWinner = document.getElementById("forceName").value.trim();
+      arc = names.length ? Math.PI / (names.length / 2) : 0;
+      startAngle = normalizeAngle(startAngle);
+      drawWheel();
+      updatePointerColor();
+    }
 
-    if (t < 1) {
+    function ensureSetup() { if (!names.length) setupWheel(); }
+
+    function drawWheel() {
+      const canvas = document.getElementById("wheelCanvas");
+      ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (!names.length) {
+        ctx.beginPath(); ctx.arc(250, 250, 250, 0, Math.PI * 2); ctx.fillStyle = "#ffffff"; ctx.fill();
+        ctx.strokeStyle = "#ddd"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = "#666"; ctx.font = "16px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("Enter names and click Set Names (or just press Spin)", 250, 250);
+        return;
+      }
+
+      const base = normalizeAngle(startAngle);
+
+      for (let i = 0; i < names.length; i++) {
+        const angle = base + i * arc;
+
+        // slice
+        ctx.beginPath();
+        ctx.moveTo(250, 250);
+        ctx.arc(250, 250, 250, angle, angle + arc, false);
+        ctx.closePath();
+        ctx.fillStyle = COLORS[i % COLORS.length];
+        ctx.fill();
+
+        // subtle separators
+        ctx.strokeStyle = "rgba(0,0,0,0.08)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // label
+        ctx.save();
+        ctx.translate(250, 250);
+        ctx.rotate(angle + arc / 2);
+        ctx.fillStyle = "#000";
+        ctx.font = "16px Arial";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        ctx.fillText(names[i], 230, 0);
+        ctx.restore();
+      }
+
+      // center hub
+      ctx.beginPath();
+      ctx.arc(250, 250, 36, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#eee";
+      ctx.stroke();
+    }
+
+    /* ======= Pointer color tracking ======= */
+    function updatePointerColor() {
+      if (!names.length || !arc) return;
+      const base = normalizeAngle(startAngle);
+      const landed = normalizeAngle(POINTER_ANGLE - base); // [0, 2π)
+      const idx = Math.floor(landed / arc) % names.length;
+      const color = COLORS[idx % COLORS.length];
+      pointerEl.style.borderTopColor = color; // pointer faces down
+    }
+
+    /* ======= Spin (with absolute rigging) ======= */
+    function spinWheel() {
+      ensureSetup();
+      if (!names.length) return;
+
+      // Timing feel same as earlier (4–7s)
+      const spinTimeTotal = Math.random() * 3000 + 4000; // 4s..7s
+      animDuration = spinTimeTotal;
+
+      // Winner index: forced exact match or random
+      const fw = document.getElementById("forceName").value.trim();
+      forcedWinner = fw;
+      if (fw && names.includes(fw)) {
+        rigTargetIndex = names.indexOf(fw);
+      } else {
+        rigTargetIndex = null;
+      }
+      const winnerIndex = (rigTargetIndex !== null)
+        ? rigTargetIndex
+        : Math.floor(Math.random() * names.length);
+
+      // Align winner's slice center to the fixed pointer at top (correct math)
+      const current = normalizeAngle(startAngle);
+      // final base must satisfy: base_final + idx*arc + arc/2 = POINTER_ANGLE (mod 2π)
+      const targetBase = normalizeAngle(POINTER_ANGLE - (winnerIndex * arc + arc / 2));
+      // rotate from current base to target base + extra full turns for show
+      let delta = normalizeAngle(targetBase - current) + Math.PI * 2 * 5;
+
+      animFrom = current;
+      animDelta = delta;
+
+      cancelAnimationFrame(animRAF);
+      animStart = performance.now();
       animateSpin(winnerIndex);
-    } else {
-      stopRotateWheel();
     }
-  });
-}
 
-function stopRotateWheel() {
-  if (!names.length) return;
+    function animateSpin(winnerIndex) {
+      animRAF = requestAnimationFrame((now) => {
+        const t = Math.min(1, (now - animStart) / animDuration);
+        const p = easeOutCubic(t);
+        startAngle = normalizeAngle(animFrom + animDelta * p);
+        drawWheel();
+        updatePointerColor();
 
-  // Hard-lock to forceName if present to avoid any rounding discrepancy
-  const fw = document.getElementById("forceName").value.trim();
-  let index;
-  if (fw && names.includes(fw)) {
-    index = names.indexOf(fw);
-  } else {
-    const base = normalizeAngle(startAngle);
-    const landed = normalizeAngle(POINTER_ANGLE - base);
-    index = Math.floor((landed + 1e-6) / arc) % names.length;
-  }
+        if (t < 1) {
+          animateSpin(winnerIndex);
+        } else {
+          stopRotateWheel();
+        }
+      });
+    }
 
-  lastIndex = index;
-  const winnerName = names[index];
-  document.getElementById("winner").innerText = "Winner: " + winnerName;
+    function stopRotateWheel() {
+      if (!names.length) return;
 
-  updatePointerColor();      // lock pointer to final color
-  burstConfetti();
-  openWinnerModal(winnerName);
-}
+      // Hard-lock to forceName if present to avoid any rounding discrepancy
+      const fw = document.getElementById("forceName").value.trim();
+      let index;
+      if (fw && names.includes(fw)) {
+        index = names.indexOf(fw);
+      } else {
+        const base = normalizeAngle(startAngle);
+        const landed = normalizeAngle(POINTER_ANGLE - base);
+        index = Math.floor((landed + 1e-6) / arc) % names.length;
+      }
 
-/* ======= Confetti ======= */
-function burstConfetti(count=140){
-  confettiPieces = [];
-  const centerX = confettiCanvas.width/2;
-  const centerY = confettiCanvas.height/2;
-  for (let i=0;i<count;i++){
-    confettiPieces.push({
-      x: centerX + (Math.random()*60-30),
-      y: centerY + (Math.random()*20-10),
-      vx: (Math.random()*6-3),
-      vy: -(Math.random()*6+3),
-      size: Math.random()*4+3,
-      rot: Math.random()*360,
-      vr: (Math.random()*12-6),
-      color: `hsl(${Math.floor(Math.random()*360)}, 90%, 60%)`,
-      life: Math.random()*80+60
+      lastIndex = index;
+      const winnerName = names[index];
+      document.getElementById("winner").innerText = "Winner: " + winnerName;
+
+      updatePointerColor();      // lock pointer to final color
+      burstConfetti();
+      openWinnerModal(winnerName);
+    }
+
+    /* ======= Confetti ======= */
+    function burstConfetti(count = 140) {
+      confettiPieces = [];
+      const centerX = confettiCanvas.width / 2;
+      const centerY = confettiCanvas.height / 2;
+      for (let i = 0; i < count; i++) {
+        confettiPieces.push({
+          x: centerX + (Math.random() * 60 - 30),
+          y: centerY + (Math.random() * 20 - 10),
+          vx: (Math.random() * 6 - 3),
+          vy: -(Math.random() * 6 + 3),
+          size: Math.random() * 4 + 3,
+          rot: Math.random() * 360,
+          vr: (Math.random() * 12 - 6),
+          color: `hsl(${Math.floor(Math.random() * 360)}, 90%, 60%)`,
+          life: Math.random() * 80 + 60
+        });
+      }
+      confettiActive = true;
+      requestAnimationFrame(confettiTick);
+    }
+
+    function confettiTick() {
+      if (!confettiActive) return;
+      cctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+      let alive = 0;
+      for (const p of confettiPieces) {
+        p.vy += 0.25; // gravity
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rot += p.vr;
+        p.life--;
+
+        if (p.life > 0 && p.y < confettiCanvas.height + 20) {
+          alive++;
+          cctx.save();
+          cctx.translate(p.x, p.y);
+          cctx.rotate(p.rot * Math.PI / 180);
+          cctx.fillStyle = p.color;
+          cctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 1.5);
+          cctx.restore();
+        }
+      }
+      if (alive > 0) requestAnimationFrame(confettiTick);
+      else { confettiActive = false; cctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height); }
+    }
+
+    /* ======= Modal ======= */
+    const modalBackdrop = document.getElementById("winnerModalBackdrop");
+    const winnerText = document.getElementById("winnerText");
+    document.getElementById("removeBtn").addEventListener("click", () => {
+      if (lastIndex >= 0 && names[lastIndex]) {
+        const removed = names.splice(lastIndex, 1)[0];
+        document.getElementById("names").value = names.join("\n");
+        arc = names.length ? Math.PI / (names.length / 2) : 0;
+        drawWheel();
+        updatePointerColor();
+        document.getElementById("winner").innerText = `Removed: ${removed}`;
+      }
+      closeWinnerModal();
     });
-  }
-  confettiActive = true;
-  requestAnimationFrame(confettiTick);
-}
+    document.getElementById("keepBtn").addEventListener("click", () => {
+      closeWinnerModal();
+    });
+    document.getElementById("closeBtn").addEventListener("click", closeWinnerModal);
 
-function confettiTick(){
-  if (!confettiActive) return;
-  cctx.clearRect(0,0,confettiCanvas.width, confettiCanvas.height);
-  let alive = 0;
-  for (const p of confettiPieces){
-    p.vy += 0.25; // gravity
-    p.x += p.vx;
-    p.y += p.vy;
-    p.rot += p.vr;
-    p.life--;
-
-    if (p.life > 0 && p.y < confettiCanvas.height + 20){
-      alive++;
-      cctx.save();
-      cctx.translate(p.x, p.y);
-      cctx.rotate(p.rot*Math.PI/180);
-      cctx.fillStyle = p.color;
-      cctx.fillRect(-p.size/2, -p.size/2, p.size, p.size*1.5);
-      cctx.restore();
+    function openWinnerModal(name) {
+      winnerText.innerHTML = ` <span id="winner-text"> ${name}</span>`;
+      modalBackdrop.style.display = "flex";
     }
-  }
-  if (alive > 0) requestAnimationFrame(confettiTick);
-  else { confettiActive = false; cctx.clearRect(0,0,confettiCanvas.width, confettiCanvas.height); }
-}
+    function closeWinnerModal() { modalBackdrop.style.display = "none"; }
+    modalBackdrop.addEventListener("click", (e) => { if (e.target === modalBackdrop) closeWinnerModal(); });
 
-/* ======= Modal ======= */
-const modalBackdrop = document.getElementById("winnerModalBackdrop");
-const winnerText = document.getElementById("winnerText");
-document.getElementById("removeBtn").addEventListener("click", () => {
-  if (lastIndex >= 0 && names[lastIndex]) {
-    const removed = names.splice(lastIndex, 1)[0];
-    document.getElementById("names").value = names.join("\n");
-    arc = names.length ? Math.PI / (names.length / 2) : 0;
-    drawWheel();
-    updatePointerColor();
-    document.getElementById("winner").innerText = `Removed: ${removed}`;
-  }
-  closeWinnerModal();
-});
-document.getElementById("keepBtn").addEventListener("click", () => {
-  closeWinnerModal();
-});
-document.getElementById("closeBtn").addEventListener("click", closeWinnerModal);
+    /* ======= Hide controls ======= */
+    function toggleControls() {
+      const hide = document.getElementById("hideControls").checked;
+      const namesEl = document.getElementById("names");
+      const forceEl = document.getElementById("forceName");
+      if (hide) { namesEl.classList.add("hidden"); forceEl.classList.add("hidden"); }
+      else { namesEl.classList.remove("hidden"); forceEl.classList.remove("hidden"); }
+    }
 
-function openWinnerModal(name){
-  winnerText.textContent = `Winner: ${name}. Do you want to remove them from the list or keep them?`;
-  modalBackdrop.style.display = "flex";
-}
-function closeWinnerModal(){ modalBackdrop.style.display = "none"; }
-modalBackdrop.addEventListener("click", (e)=>{ if (e.target === modalBackdrop) closeWinnerModal(); });
-
-/* ======= Hide controls ======= */
-function toggleControls() {
-  const hide = document.getElementById("hideControls").checked;
-  const namesEl = document.getElementById("names");
-  const forceEl = document.getElementById("forceName");
-  if (hide) { namesEl.classList.add("hidden"); forceEl.classList.add("hidden"); }
-  else { namesEl.classList.remove("hidden"); forceEl.classList.remove("hidden"); }
-}
-
-// First paint
-drawWheel();</script>
+    // First paint
+    drawWheel();</script>
